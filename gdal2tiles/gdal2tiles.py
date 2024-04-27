@@ -37,36 +37,34 @@
 #  DEALINGS IN THE SOFTWARE.
 # ******************************************************************************
 
-from __future__ import print_function, division
+from __future__ import division, print_function
 
 import math
 import os
-import tempfile
 import shutil
 import sys
+import tempfile
 from uuid import uuid4
 from xml.etree import ElementTree
 
 try:
     # try to use billiard because it seems to works with Celery
     # https://github.com/celery/celery/issues/1709
-    from billiard import Pipe, Pool, Process, Manager
+    from billiard import Manager, Pipe, Pool, Process
 except ImportError:
     from multiprocessing import Pipe, Pool, Process, Manager
 
-from osgeo import gdal
-from osgeo import osr
+from osgeo import gdal, osr
 
 try:
-    from PIL import Image
     import numpy
     import osgeo.gdal_array as gdalarray
+    from PIL import Image
 except Exception:
     # 'antialias' resampling is not available
     pass
 
 from .utils import AttrDict
-
 
 resampling_list = ('average', 'near', 'bilinear', 'cubic', 'cubicspline', 'lanczos', 'antialias')
 profile_list = ('mercator', 'geodetic', 'raster')
@@ -947,8 +945,8 @@ def gettempfilename(suffix):
             tmpdir = '.'
             if 'TMP' in os.environ:
                 tmpdir = os.environ['TMP']
-            import time
             import random
+            import time
             random.seed(time.time())
             random_part = 'file%d' % random.randint(0, 1000000000)
             return os.path.join(tmpdir, random_part + suffix)
@@ -2724,7 +2722,7 @@ def worker_tile_details(input_file, output_folder, options, send_pipe=None):
     gdal2tiles.open_input()
     gdal2tiles.generate_metadata()
     tile_job_info, tile_details = gdal2tiles.generate_base_tiles()
-    return_data = (tile_job_info, tile_details)
+    return_data = (tile_job_info, tile_details, gdal2tiles.swne)
     if send_pipe:
         send_pipe.send(return_data)
 
@@ -2816,7 +2814,7 @@ def single_threaded_tiling(input_file, output_folder, **options):
 
     if options.verbose:
         print("Begin tiles details calc")
-    conf, tile_details = worker_tile_details(input_file, output_folder, options)
+    conf, tile_details, swne = worker_tile_details(input_file, output_folder, options)
 
     if options.verbose:
         print("Tiles details calc complete.")
@@ -2852,7 +2850,7 @@ def multi_threaded_tiling(input_file, output_folder, **options):
     # Make sure to consume the queue before joining. If the payload is too big, it won't be put in
     # one go in the queue and therefore the sending process will never finish, waiting for space in
     # the queue to send data
-    conf, tile_details = conf_receiver.recv()
+    conf, tile_details, swne = conf_receiver.recv()
     p.join()
     if options.verbose:
         print("Tiles details calc complete.")
@@ -2879,6 +2877,8 @@ def multi_threaded_tiling(input_file, output_folder, **options):
     create_overview_tiles(conf, output_folder, options)
 
     shutil.rmtree(os.path.dirname(conf.src_file))
+
+    return conf, tile_details, swne
 
 
 def generate_tiles(input_file, output_folder, **options):
@@ -2942,4 +2942,4 @@ def generate_tiles(input_file, output_folder, **options):
     if nb_processes == 1:
         single_threaded_tiling(input_file, output_folder, **options)
     else:
-        multi_threaded_tiling(input_file, output_folder, **options)
+        return multi_threaded_tiling(input_file, output_folder, **options)
