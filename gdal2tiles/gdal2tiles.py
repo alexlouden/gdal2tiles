@@ -1053,6 +1053,21 @@ def create_base_tile(tile_job_info, tile_detail, queue=None):
         queue.put("tile %s %s %s" % (tx, ty, tz))
 
 
+def create_transparent_png(tile_size):
+    # Create a GDAL in-memory raster
+    mem_driver = gdal.GetDriverByName('MEM')
+    # Create an in-memory dataset, 4 bands (RGBA), Byte type
+    dataset = mem_driver.Create('', tile_size, tile_size, 4, gdal.GDT_Byte)
+
+    # Set RGBA to transparent (0,0,0,0)
+    for i in range(4):
+        band = dataset.GetRasterBand(i+1)
+        band.Fill(0)  # Filling with 0 for transparency in RGBA
+        band.SetNoDataValue(0)
+
+    return dataset
+
+
 def create_overview_tiles(tile_job_info, output_folder, options):
     """Generation of the overview tiles (higher in the pyramid) based on existing tiles"""
     mem_driver = gdal.GetDriverByName('MEM')
@@ -1120,10 +1135,14 @@ def create_overview_tiles(tile_job_info, output_folder, options):
                     for x in range(2 * tx, 2 * tx + 2):
                         minx, miny, maxx, maxy = tile_job_info.tminmax[tz + 1]
                         if x >= minx and x <= maxx and y >= miny and y <= maxy:
-                            dsquerytile = gdal.Open(
-                                os.path.join(output_folder, str(tz + 1), str(x),
-                                             "%s.%s" % (y, tile_job_info.tile_extension)),
-                                gdal.GA_ReadOnly)
+                            filename = os.path.join(output_folder, str(tz + 1), str(x),
+                                                "%s.%s" % (y, tile_job_info.tile_extension))
+                            if os.path.exists(filename):
+                                dsquerytile = gdal.Open(filename, gdal.GA_ReadOnly)
+                            else:
+                                print('file does not exist', filename)
+                                print({"tx": tx, "ty": ty, "tz": tz, "x": x, "y": y, "job_info": [minx, miny, maxx, maxy]})
+                                dsquerytile = create_transparent_png(tile_job_info.tile_size)
                             if (ty == 0 and y == 1) or (ty != 0 and (y % (2 * ty)) != 0):
                                 tileposy = 0
                             else:
